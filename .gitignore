@@ -1,0 +1,19 @@
+# 忽略 Python 编译文件
+*.pyc
+__pycache__/
+
+# # 忽略日志文件
+# *.log
+# *.txt
+# *.tfevents.*
+
+# 忽略 saved/log 目录下的所有文件
+saved/log/*
+
+# 忽略模型权重文件
+*.pth
+*.pt
+
+# 忽略输出文件夹
+outputs/
+checkpoints/
