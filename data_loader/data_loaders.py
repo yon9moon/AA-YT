@@ -606,6 +606,195 @@ class DA_70028_Dataset(Dataset):
         return images, labels, lens_dir
     
 
+class DA_70028_Dataset_classification(Dataset):
+    def __init__(self, data_dir, img_num, batch_size, num_bins=85):
+        # 如果 data_dir 是字符串，转换为列表
+        if isinstance(data_dir, str):
+            data_dir = [data_dir]
+        self.data_dirs = data_dir
+        self.img_num = img_num
+        self.batch_size = batch_size
+        self.num_bins = num_bins  # 新增：每个维度的bin数量
+
+        all_leaf_folders = []
+        for data_dir in self.data_dirs:
+
+            is_train_data = '/home/lwy/724-70028/XY/train-DA' in data_dir
+
+            # 对于 train-DA 数据，过滤 label[0] 不能被2整除的文件夹
+            if is_train_data:
+                # 筛选第一级子目录中命名
+                top_level_folders = [
+                    os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
+                    if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) > 20 and int(folder) < 22
+                ]
+                # 遍历筛选后的文件夹，提取叶子节点
+                leaf_folders = [
+                    dirpath for top_folder in top_level_folders
+                    for dirpath, dirnames, filenames in os.walk(top_folder)
+                    if not dirnames
+                ]
+                filtered_folders = []
+                for folder in leaf_folders:
+                    last_part = folder.split('/')[-1]
+                    label_strings = last_part.split(',')  # 根据逗号分割
+                    labels = [float(label) for label in label_strings[:2]]
+                    if labels[0] % 10 == 0 and labels[1] % 10 ==0:  # 仅保留 label[0] 能被2整除的文件夹
+                        filtered_folders.append(folder)
+                leaf_folders = filtered_folders
+
+            elif '/home/lwy/stol2trg' in data_dir:
+                # 筛选第一级子目录中命名
+                top_level_folders = [
+                    os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
+                    if os.path.isdir(os.path.join(data_dir, folder))
+                ]
+                # 遍历筛选后的文件夹，提取叶子节点
+                leaf_folders = [
+                    dirpath for top_folder in top_level_folders
+                    for dirpath, dirnames, filenames in os.walk(top_folder)
+                    if not dirnames
+                ]
+                
+            elif '/home/lwy/70028-Stol-' in data_dir:
+                # 筛选第一级子目录中命名
+                top_level_folders = [
+                    os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
+                    # if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) > 0 and int(folder) < 101
+                    if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) in {52, 31, 85, 77, 71}
+                ]
+                # 遍历筛选后的文件夹，提取叶子节点
+                leaf_folders = [
+                    dirpath for top_folder in top_level_folders
+                    for dirpath, dirnames, filenames in os.walk(top_folder)
+                    if not dirnames
+                ]
+
+            else:
+                # 读取所有文件夹（直到叶子节点）
+                leaf_folders = [dirpath for dirpath, dirnames, filenames in os.walk(data_dir) if not dirnames]
+
+            all_leaf_folders.extend(leaf_folders)
+
+        # 将结果赋值给 self.folder_list
+        self.folder_list = all_leaf_folders
+
+        # 定义数据转换
+        self.transform = transforms.Compose([
+            transforms.ToTensor()
+        ])
+        
+        # 定义离散化网格
+        self.bin_edges = np.linspace(-1, 1, num_bins + 1)  # 假设归一化范围[-1, 1]
+
+    def __len__(self):
+        return len(self.folder_list)
+    
+    def crop_centroid(self, image, crop_size):
+        """Crop image to specified size centered at the centroid using projection method"""
+
+        img_array = np.array(image)
+        # Locate centroid using projection
+        row_sums = np.sum(img_array, axis=1)
+        y_center = np.argmax(row_sums)
+        col_sums = np.sum(img_array, axis=0)
+        x_center = np.argmax(col_sums)
+        half_size = crop_size // 2
+        crop = img_array[y_center - half_size:y_center + half_size, x_center - half_size:x_center + half_size]
+        
+        if crop.shape != (crop_size, crop_size):
+            raise ValueError(f"Cropped image size not {crop_size}x{crop_size}")
+        
+        return Image.fromarray(crop)
+
+    def _discretize_labels(self, labels):
+        """将连续标签(x, y)离散化为类别索引"""
+        x, y = labels[0], labels[1]
+        x = x / 42
+        y = y / 42
+        x_bin = np.digitize(x, self.bin_edges) - 1  # 0到num_bins-1
+        y_bin = np.digitize(y, self.bin_edges) - 1
+        # 确保索引在有效范围内
+        x_bin = np.clip(x_bin, 0, self.num_bins - 1)
+        y_bin = np.clip(y_bin, 0, self.num_bins - 1)
+        # 转换为单一类别索引：x_bin * num_bins + y_bin
+        class_idx = x_bin * self.num_bins + y_bin
+        return torch.tensor(class_idx, dtype=torch.long)
+
+    def __getitem__(self, idx):
+        images = []
+        folder_name = self.folder_list[idx]
+        parts = folder_name.split('/')
+        lens_dir = '/'.join(parts[:6])
+        last_part = parts[-1]
+
+        is_real_data = '/home/lwy/724-70028/XY' in folder_name or '/home/lwy/Ttest2SowithoutISP' in folder_name or '/home/lwy/Ttest2SowoISP_TOL_train' in folder_name
+        
+        if is_real_data:
+            label_strings = last_part.split(',')
+            labels = [float(label) for label in label_strings[:2]]
+            labels = torch.tensor(labels)
+            class_label = self._discretize_labels(labels)  # 离散化为类别索引
+            
+            image_list = [f for f in os.listdir(folder_name) if f.endswith('-p.png')]
+            image_list = sorted(image_list, key=lambda x: x)
+
+            for i in range(self.img_num):
+                if len(image_list) != self.img_num:
+                    raise ValueError(f"Error: The length of image_list ({len(image_list)}) does not match img_num ({self.img_num}).\n"
+                                    f"Folder name: {folder_name}\n"
+                                    f"Image list: {image_list}")
+                image = Image.open(os.path.join(folder_name, image_list[i])).convert('L')
+                image = self.transform(image)
+                image = image.float()
+                images.append(image)
+
+            images = torch.stack(images)
+        else:
+            if '_' in last_part:
+                label_strings = last_part.split('_')[1].split(' ')
+            else:
+                label_strings = last_part.split(' ')
+            labels = [float(label) for label in label_strings[:2]]
+            labels = torch.tensor(labels)
+            class_label = self._discretize_labels(labels)  # 离散化为类别索引
+            
+            image_list = [f for f in os.listdir(folder_name) if f.endswith('.png')]
+            image_list = sorted(image_list, key=lambda x: x)
+
+            for i in range(self.img_num):
+                if len(image_list) != self.img_num:
+                    raise ValueError(f"Error: The length of image_list ({len(image_list)}) does not match img_num ({self.img_num}).\n"
+                                    f"Folder name: {folder_name}\n"
+                                    f"Image list: {image_list}")
+                image = Image.open(os.path.join(folder_name, image_list[i])).convert('L')
+                if '/home/lwy/src2trg' in folder_name or '/home/lwy/stol2trg' in folder_name or '/home/lwy/So_wISP2So_woISP' in folder_name or '/home/lwy/Stol2SowoISP' in folder_name:
+                    pass
+                else:
+                    image = self.crop_centroid(image, 70)
+                image = self.transform(image)
+                image = image.float()
+                images.append(image)
+
+            images = torch.stack(images)
+
+        return images, class_label, lens_dir
+    
+class DA_70028_DataLoader_classification(DataLoader):
+    def __init__(self, data_dir, img_num, batch_size, shuffle=True, num_workers=8, training=True, num_bins=10):
+        if isinstance(data_dir, str):
+            data_dir = [data_dir]
+        self.data_dir = data_dir
+        self.img_num = img_num
+        self.num_workers = num_workers
+        self.batch_size = batch_size
+        self.dataset = DA_70028_Dataset_classification(data_dir, img_num, batch_size, num_bins=num_bins)
+        super().__init__(self.dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+        
+        self.info = {
+            "list_path_data": data_dir,
+            "len(dataset)": len(self.dataset)
+        }
 
 if __name__ == "__main__":
 
