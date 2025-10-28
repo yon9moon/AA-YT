@@ -1,5 +1,5 @@
 {
-    "name": "So + S2T + Ttrain(1, 10) Finetune-Ttest",
+    "name": "70028Stol(5, with ISP)+S2T(5, unpaired), Ttrain(1, step=10um) FT-Ttest",
     "n_gpu": 1,
     "arch": {
         "type": "AAmodel",

@@ -43,16 +43,16 @@ def preprocess_images(base_dirs):
                         try:
                             # 打开图片
                             image = Image.open(image_path).convert('L')  # 转为灰度图
-                            img_array = np.array(image, dtype=np.float32) / 255.0  # 转为浮点数数组
+                            img_array = np.array(image)
                             
                             # 预处理
-                            img_array = normalization(img_array)
+                            # img_array = normalization(img_array)
                             img_array = crop_centroid(img_array, 280)
                             img_array = downsample_image(img_array, 70)
                             
                             # 保存新图片
                             new_image_path = os.path.join(root, f"{i}-p.png")
-                            Image.fromarray((img_array * 255).astype(np.uint8)).save(new_image_path)  # 转为uint8保存
+                            Image.fromarray(img_array).save(new_image_path)  # 转为uint8保存
                             print(f"Processed and saved: {new_image_path}")
                         except Exception as e:
                             print(f"Error processing {image_path}: {e}")

@@ -22,6 +22,7 @@ from pathlib import Path
 import random
 from operator import itemgetter
 from PIL import Image
+from collections import defaultdict
 
 def normalization(data):
     _range = np.max(data) - np.min(data)
@@ -409,29 +410,29 @@ class DA_70028_Dataset(Dataset):
                     last_part = folder.split('/')[-1]
                     label_strings = last_part.split(',')  # 根据逗号分割
                     labels = [float(label) for label in label_strings[:2]]
-                    if labels[0] % 2 == 0 and labels[1] % 2 ==0:  # 仅保留 label[0] 能被2整除的文件夹
+                    if labels[0] % 10 == 0 and labels[1] % 10 ==0:  # 仅保留 label[0] 能被2整除的文件夹
                         filtered_folders.append(folder)
                 leaf_folders = filtered_folders
 
-            elif '/home/lwy/Stol2trg' in data_dir:
-                # 读取所有文件夹（直到叶子节点）
-                leaf_folders = [dirpath for dirpath, dirnames, filenames in os.walk(data_dir) if not dirnames]
-
-                # 筛选叶子文件夹
-                filtered_folders = []
-                for folder in leaf_folders:
-                    leaf_folder = os.path.basename(folder)  # 获取叶子文件夹名称
-                    parts = leaf_folder.split('_')  # 按下划线分割
-                    if len(parts) > 0 and parts[0].isdigit():  # 确保第一部分存在且为数字
-                        if int(parts[0]) < 6:  # 检查第一部分是否小于6
-                            filtered_folders.append(folder)
-                leaf_folders = filtered_folders
-                
-            elif '/home/lwy/70028-Stol-target-dataset' in data_dir:
+            elif '/home/lwy/stol2trg' in data_dir:
                 # 筛选第一级子目录中命名
                 top_level_folders = [
                     os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
-                    if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) > 0 and int(folder) < 6
+                    if os.path.isdir(os.path.join(data_dir, folder))
+                ]
+                # 遍历筛选后的文件夹，提取叶子节点
+                leaf_folders = [
+                    dirpath for top_folder in top_level_folders
+                    for dirpath, dirnames, filenames in os.walk(top_folder)
+                    if not dirnames
+                ]
+                
+            elif '/home/lwy/70028-Stol-' in data_dir:
+                # 筛选第一级子目录中命名
+                top_level_folders = [
+                    os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
+                    # if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) > 0 and int(folder) < 101
+                    if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) in {52, 31, 85, 77, 71}
                 ]
                 # 遍历筛选后的文件夹，提取叶子节点
                 leaf_folders = [
@@ -446,6 +447,24 @@ class DA_70028_Dataset(Dataset):
 
             all_leaf_folders.extend(leaf_folders)
 
+        # # 检查是否为特殊路径
+        # is_special = any('/home/lwy/70028-Stol-target-dataset' in d or '/home/lwy/Stol2trg' in d for d in self.data_dirs)
+
+        # if is_special:
+        #     self.folder_dict = defaultdict(list)
+        #     for folder in all_leaf_folders:
+        #         last_part = os.path.basename(folder)
+        #         if '_' in last_part:
+        #             label_str = last_part.split('_')[1]
+        #         else:
+        #             label_str = last_part
+        #         labels = tuple(map(float, label_str.split()[:2]))
+        #         self.folder_dict[labels].append(folder)
+        #     self.ecc_positions = list(self.folder_dict.keys())
+        #     self.ecc_positions.sort()  # 可选：排序以保持一致性
+        # else:
+        #     self.folder_list = all_leaf_folders
+
         # 将结果赋值给 self.folder_list
         self.folder_list = all_leaf_folders
 
@@ -453,8 +472,13 @@ class DA_70028_Dataset(Dataset):
         self.transform = transforms.Compose([
             transforms.ToTensor()
         ])
-
+    
     def __len__(self):
+        # if hasattr(self, 'ecc_positions'):
+        #     return len(self.ecc_positions)
+        # else:
+        #     return len(self.folder_list)
+        
         return len(self.folder_list)
     
     def crop_centroid(self, image, crop_size):
@@ -479,19 +503,33 @@ class DA_70028_Dataset(Dataset):
         img_array = np.array(image)
         downsampled = cv2.resize(img_array, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
         return Image.fromarray(downsampled)
+    
+    def mask_center(self, image, mask_size):
+        """Mask the center region of the image with zeros"""
+        img_array = np.array(image)
+        center_row, center_col = img_array.shape[0] // 2, img_array.shape[1] // 2
+        half_size = mask_size // 2
+        img_array[center_row - half_size:center_row + half_size, center_col - half_size:center_col + half_size] = 0
+        return Image.fromarray(img_array)
 
     def __getitem__(self, idx):
         images = []
+        # if hasattr(self, 'ecc_positions'):
+        #     ecc_key = self.ecc_positions[idx]
+        #     folder_name = random.choice(self.folder_dict[ecc_key])
+        # else:
+        #     folder_name = self.folder_list[idx]
         # 从文件夹名中提取标签
         folder_name = self.folder_list[idx]
         parts = folder_name.split('/')
         lens_dir = '/'.join(parts[:6])
         last_part = parts[-1] # 取出最后一部分，例如 '-4 -6 0'
 
-        is_real_data = '/home/lwy/724-70028/XY' in folder_name
+        is_real_data = '/home/lwy/724-70028/XY' in folder_name or '/home/lwy/Ttest2SowithoutISP' in folder_name or '/home/lwy/Ttest2SowoISP_TOL_train' in folder_name
         
         if is_real_data:
             label_strings = last_part.split(',')  # 根据,分割
+
             labels = [float(label) for label in label_strings[:2]]
             
             labels = torch.tensor(labels) / 20 # 转换为 PyTorch 张量
@@ -510,7 +548,7 @@ class DA_70028_Dataset(Dataset):
                     raise ValueError(f"Error: The length of image_list ({len(image_list)}) does not match img_num ({self.img_num}).\n"
                                     f"Folder name: {folder_name}\n"
                                     f"Image list: {image_list}")
-                image = Image.open(os.path.join(folder_name, image_list[i]))
+                image = Image.open(os.path.join(folder_name, image_list[i])).convert('L')
                 # image = np.array(image)
                 # image = adjust_gamma(image)
                 # image = cv2.medianBlur(image, 3)
@@ -518,6 +556,7 @@ class DA_70028_Dataset(Dataset):
                 # image = normalization(image)
                 # image = self.crop_centroid(image, 280)
                 # image = self.downsample_image(image, 70)
+                # image = self.mask_center(image, 30)
                 image = self.transform(image)
                 image = image.float() 
                 images.append(image)
@@ -551,11 +590,12 @@ class DA_70028_Dataset(Dataset):
                 # image = adjust_gamma(image)
                 # image = cv2.medianBlur(image, 3)
                 # image = Image.fromarray(image)
-                image = normalization(image)
-                if '/home/lwy/src2trg' in folder_name or '/home/lwy/Stol2trg' in folder_name:
+                # image = normalization(image)
+                if '/home/lwy/src2trg' in folder_name or '/home/lwy/stol2trg' in folder_name or '/home/lwy/So_wISP2So_woISP' in folder_name or '/home/lwy/Stol2SowoISP' in folder_name:
                     pass
                 else:
                     image = self.crop_centroid(image, 70)
+                # image = self.mask_center(image, 30)
                 image = self.transform(image)
                 image = image.float() 
                 images.append(image)

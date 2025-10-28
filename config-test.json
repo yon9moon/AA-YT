@@ -13,7 +13,7 @@
         "type": "DA_70028_DataLoader",
         "args": {
             "data_dir": "/mnt1/lwy/Z-defocused/train",
-            "test_data_dir": "/home/lwy/724-70028/XY/test-DA",  
+            "test_data_dir": "/home/lwy/70028-Stol-target-dataset",  
             "batch_size": 64,
             "shuffle": false,
             "num_workers": 16,

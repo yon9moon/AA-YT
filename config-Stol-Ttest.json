@@ -1,5 +1,5 @@
 {
-    "name": "So + S2T + Stol(5) + Stol2trg(5)-Ttest",
+    "name": "70028Stol2SowoISP-Ttest2SowoISP_TOL_train",
     "n_gpu": 1,
     "arch": {
         "type": "AAmodel",
@@ -12,7 +12,7 @@
     "data_loader": {
         "type": "DA_70028_DataLoader",
         "args": {
-            "data_dir": ["/home/lwy/70028-Stol-target-dataset", "/home/lwy/Stol2trg", "/home/lwy/70028-So-target-dataset", "/home/lwy/src2trg"],
+            "data_dir": ["/home/lwy/Stol2SowoISP"],
             "batch_size": 64,
             "shuffle": true,
             "num_workers": 8,
@@ -22,7 +22,7 @@
     "valid_data_loader": {
         "type": "DA_70028_DataLoader",
         "args": {
-            "data_dir": "/home/lwy/724-70028/XY/test-DA",
+            "data_dir": "/home/lwy/Ttest2SowoISP_TOL_train",
             "batch_size": 64,
             "shuffle": true,
             "num_workers": 8,

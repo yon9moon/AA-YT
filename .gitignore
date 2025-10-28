@@ -7,8 +7,8 @@ __pycache__/
 # *.txt
 # *.tfevents.*
 
-# 忽略 saved/log 目录下的所有文件
-saved/log/*
+# 忽略 saved/ 目录下的所有文件
+saved/*
 
 # 忽略模型权重文件
 *.pth
