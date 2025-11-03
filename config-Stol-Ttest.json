@@ -1,5 +1,5 @@
 {
-    "name": "70028Stol2SowoISP-Ttest2SowoISP_TOL_train",
+    "name": "70028Stol+Stol2trg_rms_less_than_1.62_v2-Ttest",
     "n_gpu": 1,
     "arch": {
         "type": "AAmodel",
@@ -12,21 +12,23 @@
     "data_loader": {
         "type": "DA_70028_DataLoader",
         "args": {
-            "data_dir": ["/home/lwy/Stol2SowoISP"],
+            "data_dir": ["/home/lwy/stol2trg_10smallest_v2", "/home/lwy/70028-Stol-source-dataset"],
             "batch_size": 64,
             "shuffle": true,
             "num_workers": 8,
-            "img_num": 5
+            "img_num": 5,
+            "split": "train"
         }
     },
     "valid_data_loader": {
         "type": "DA_70028_DataLoader",
         "args": {
-            "data_dir": "/home/lwy/Ttest2SowoISP_TOL_train",
+            "data_dir": "/home/lwy/724-70028/XY/test-DA",
             "batch_size": 64,
             "shuffle": true,
             "num_workers": 8,
-            "img_num": 5
+            "img_num": 5,
+            "split": "valid"
         }
     },
     "optimizer": {

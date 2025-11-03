@@ -1,5 +1,5 @@
 {
-    "name": "70028Stol(5, with ISP)+S2T(5, unpaired), Ttrain(1, step=10um) FT-Ttest",
+    "name": "70028Stol+Stol2trg_rms_less_than_1.62_v2, Ttrain FT-Ttest",
     "n_gpu": 1,
     "arch": {
         "type": "AAmodel",

@@ -277,8 +277,6 @@ class Z_Dataset(Dataset):
         images = torch.stack(images)
         return images, Z_label, lens_dir
 
-
-
     
 class XY_Dataset(Dataset):
     def __init__(self, data_dir, img_num, batch_size):
@@ -358,7 +356,7 @@ class XY_Dataset(Dataset):
         return images, labels, lens_dir
     
 class DA_70028_DataLoader(DataLoader):
-    def __init__(self, data_dir, img_num, batch_size, shuffle=True, num_workers=8, training=True):
+    def __init__(self, data_dir, img_num, batch_size, shuffle=True, num_workers=8, training=True, split='train'):
 
         # 如果 data_dir 是字符串，转换为列表
         if isinstance(data_dir, str):
@@ -368,7 +366,7 @@ class DA_70028_DataLoader(DataLoader):
         self.img_num = img_num
         self.num_workers = num_workers
         self.batch_size = batch_size
-        self.dataset = DA_70028_Dataset(data_dir, img_num, batch_size)
+        self.dataset = DA_70028_Dataset(data_dir, img_num, batch_size, split=split)
         super().__init__(self.dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
         
 
@@ -378,7 +376,7 @@ class DA_70028_DataLoader(DataLoader):
         }
     
 class DA_70028_Dataset(Dataset):
-    def __init__(self, data_dir, img_num, batch_size):
+    def __init__(self, data_dir, img_num, batch_size, split='train'):
         # 如果 data_dir 是字符串，转换为列表
         if isinstance(data_dir, str):
             data_dir = [data_dir]
@@ -386,6 +384,7 @@ class DA_70028_Dataset(Dataset):
         self.data_dirs = data_dir
         self.img_num = img_num
         self.batch_size = batch_size
+        self.split = split  # 新增：'train' 或 'valid'
 
         all_leaf_folders = []
         for data_dir in self.data_dirs:
@@ -426,13 +425,39 @@ class DA_70028_Dataset(Dataset):
                     for dirpath, dirnames, filenames in os.walk(top_folder)
                     if not dirnames
                 ]
+            
+            elif '/home/lwy/Stol2trg' in data_dir:
+
+                # 读取所有叶子文件夹
+                leaf_folders = [dirpath for dirpath, dirnames, filenames in os.walk(data_dir) if not dirnames]
+                # 指定需要筛选的数字集合
+                selected_numbers = {76, 19, 12, 49, 11, 51, 36, 25, 18, 41}
+                # 筛选叶子文件夹
+                filtered_leaf_folders = [
+                    folder for folder in leaf_folders
+                    if folder.split(os.sep)[-1].split('_')[0].isdigit() and
+                    int(folder.split(os.sep)[-1].split('_')[0]) in selected_numbers
+                ]
+                leaf_folders = filtered_leaf_folders
                 
             elif '/home/lwy/70028-Stol-' in data_dir:
+                # 根据 split 参数选择不同的顶级文件夹
+                if self.split == 'train':
+                    # selected_folders = {3, 35, 84, 87, 54, 89, 40, 96, 79, 71}  # 训练集文件夹
+                    selected_folders = {76, 19, 12, 49, 11, 51, 36, 25, 18, 41}
+                elif self.split == 'valid':
+                    selected_folders = {14, 21, 73, 81, 58, 69, 77, 82, 70, 7}  # 验证集文件夹
+                elif self.split == 'test':
+                    # selected_folders = {14, 21, 73, 81, 58, 69, 77, 82, 70, 7} # largest rms
+                    selected_folders = {93, 5, 9, 57, 22, 98, 61, 59, 97, 30} # medium rms
+                    # selected_folders = {52, 17, 1, 10, 45, 34, 33, 67, 66, 27} # smallest rms
+                else:
+                    raise ValueError(f"Invalid split: {self.split}. Must be 'train' or 'valid'.")
                 # 筛选第一级子目录中命名
                 top_level_folders = [
                     os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
                     # if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) > 0 and int(folder) < 101
-                    if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) in {52, 31, 85, 77, 71}
+                    if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) in selected_folders
                 ]
                 # 遍历筛选后的文件夹，提取叶子节点
                 leaf_folders = [
@@ -591,7 +616,13 @@ class DA_70028_Dataset(Dataset):
                 # image = cv2.medianBlur(image, 3)
                 # image = Image.fromarray(image)
                 # image = normalization(image)
-                if '/home/lwy/src2trg' in folder_name or '/home/lwy/stol2trg' in folder_name or '/home/lwy/So_wISP2So_woISP' in folder_name or '/home/lwy/Stol2SowoISP' in folder_name:
+                if (
+                    '/home/lwy/src2trg' in folder_name or
+                    '/home/lwy/stol2trg' in folder_name or
+                    '/home/lwy/So_wISP2So_woISP' in folder_name or
+                    '/home/lwy/Stol2SowoISP' in folder_name or
+                    '/home/lwy/Stol2trg' in folder_name
+                ):
                     pass
                 else:
                     image = self.crop_centroid(image, 70)

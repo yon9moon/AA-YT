@@ -16,15 +16,7 @@ def main(config):
     output_saver = OutputSaver()
 
     # setup data_loader instances
-    data_loader = getattr(module_data, config['data_loader']['type'])(
-        config['data_loader']['args']['test_data_dir'],
-        config['data_loader']['args']['img_num'],
-        # config['data_loader']['args']['dataset_length'],
-        config['data_loader']['args']['batch_size'],
-        shuffle=False,
-        training=False,
-        num_workers=8
-    )
+    data_loader = config.init_obj('data_loader', module_data)
 
     # build model architecture
     model = config.init_obj('arch', module_arch)

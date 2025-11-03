@@ -24,12 +24,12 @@ def top_k_acc(output, target, k=3):
 def mae_xs(output, target):
     with torch.no_grad():
         MAE_x = torch.mean(torch.abs(output[:,0]-target[:,0])).item()
-    return MAE_x
+    return MAE_x * 20
 
 def mae_ys(output, target):
     with torch.no_grad():
         MAE_y = torch.mean(torch.abs(output[:,1]-target[:,1])).item()
-    return MAE_y
+    return MAE_y * 20
 
 def mae_xt(output, target):
     with torch.no_grad():

@@ -41,5 +41,5 @@ def process_leaf_folders(base_path):
 
 
 # 设置目标路径
-base_path = r'/home/lwy/Stol2SowoISP'
+base_path = r'/home/lwy/stol2trg_10smallest_v2'
 process_leaf_folders(base_path)
