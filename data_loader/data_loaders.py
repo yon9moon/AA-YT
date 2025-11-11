@@ -191,7 +191,19 @@ def adjust_gamma(image):
     adjusted_image = np.array(np.power((image/255), invgamma)*255, dtype=np.uint8)
     return adjusted_image
 
+# ==================== 种子锁定（DataLoader 专用） ====================
+SEED = 123   # 与 train.py 保持一致
 
+def _worker_init_fn(worker_id: int) -> None:
+    """每个 worker 进程的随机种子"""
+    worker_seed = (torch.initial_seed() + worker_id) % (2 ** 32)
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+# 为所有 DataLoader 提供统一的 Generator
+_dataloader_generator = torch.Generator()
+_dataloader_generator.manual_seed(SEED)
+# ==============================================================
 
 
 class AADataLoader(DataLoader):
@@ -367,7 +379,14 @@ class DA_70028_DataLoader(DataLoader):
         self.num_workers = num_workers
         self.batch_size = batch_size
         self.dataset = DA_70028_Dataset(data_dir, img_num, batch_size, split=split)
-        super().__init__(self.dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+        super().__init__(
+            dataset=self.dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            worker_init_fn=_worker_init_fn,          # <<< 新增
+            generator=_dataloader_generator           # <<< 新增
+        )
         
 
         self.info = {

@@ -1,6 +1,7 @@
 import argparse
 import collections
 import torch
+import random
 import numpy as np
 import data_loader.data_loaders as module_data
 import model.loss as module_loss
@@ -14,16 +15,39 @@ import os
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 
-# fix random seeds for reproducibility
+# # fix random seeds for reproducibility
+# SEED = 123
+# torch.manual_seed(SEED)
+# torch.backends.cudnn.deterministic = True
+# torch.backends.cudnn.benchmark = False
+# np.random.seed(SEED)
+
+# ==================== 完整种子锁定 ====================
 SEED = 123
+
+random.seed(SEED)
+np.random.seed(SEED)
 torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+os.environ['PYTHONHASHSEED'] = str(SEED)
+
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-np.random.seed(SEED)
+# =====================================================
 
 
 def main(config):
     logger = config.get_logger('train')
+
+    # --- 随机性验证 ---
+    print("=== 随机性检查 ===")
+    print("Python:", random.random())
+    print("NumPy: ", np.random.rand(2))
+    print("Torch CPU:", torch.rand(2).numpy())
+    if torch.cuda.is_available():
+        print("Torch GPU:", torch.rand(2, device='cuda').cpu().numpy())
+    # -------------------
+        
     # setup data_loader instances
     data_loader = config.init_obj('data_loader', module_data)
     valid_data_loader = config.init_obj('valid_data_loader', module_data)

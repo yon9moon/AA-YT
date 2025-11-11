@@ -1,5 +1,5 @@
 {
-    "name": "70028Ttrain(1, 10)-Ttest(18)",
+    "name": "70028Ttrain(5, 2um)-Ttest(18)",
     "n_gpu": 1,
     "arch": {
         "type": "AAmodel",
