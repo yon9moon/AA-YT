@@ -7,6 +7,7 @@ from base import BaseTrainer
 from utils import inf_loop, MetricTracker
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from model.metric import mae_with_std
 
 
 class Trainer(BaseTrainer):
@@ -88,6 +89,10 @@ class Trainer(BaseTrainer):
         """
         self.model.eval()
         self.valid_metrics.reset()
+
+        all_outputs = []
+        all_targets = []
+
         with torch.no_grad():
             for batch_idx, (data, target, _) in enumerate(tqdm(self.valid_data_loader)):
                 data, target = data.to(self.device), target.to(self.device)
@@ -95,16 +100,31 @@ class Trainer(BaseTrainer):
                 output = self.model(data)
                 loss = self.criterion(output, target)
 
+                all_outputs.append(output.cpu())
+                all_targets.append(target.cpu())
+
                 self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
                 self.valid_metrics.update('loss', loss.item())
                 for met in self.metric_ftns:
                     self.valid_metrics.update(met.__name__, met(output, target))
                 # self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
 
+
+        log = self.valid_metrics.result()
+
+        if all_outputs:
+            outputs = torch.cat(all_outputs, dim=0)
+            targets = torch.cat(all_targets, dim=0)
+            std_stats = mae_with_std(outputs, targets)
+            for key, value in std_stats.items():
+                scalar = float(value)
+                log[key] = scalar
+                self.writer.add_scalar(key, scalar)
+
         # add histogram of model parameters to the tensorboard
         for name, p in self.model.named_parameters():
             self.writer.add_histogram(name, p, bins='auto')
-        return self.valid_metrics.result()
+        return log
 
     def _progress(self, batch_idx):
         base = '[{}/{} ({:.0f}%)]'

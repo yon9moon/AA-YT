@@ -40,6 +40,8 @@ def main(config):
 
     total_loss = 0.0
     total_metrics = torch.zeros(len(metric_fns))
+    collected_outputs = []
+    collected_targets = []
 
     with torch.no_grad():
         for i, (data, target, lens_dir) in enumerate(tqdm(data_loader)):
@@ -48,6 +50,8 @@ def main(config):
 
              # 更新预测值和真实值
             output_saver.update(output, target, {'lens_dir': lens_dir})
+            collected_outputs.append(output.cpu())
+            collected_targets.append(target.cpu())
 
             #
             # save sample images, or do something with output here
@@ -70,6 +74,12 @@ def main(config):
     output_saver.save("analysis/output.json")
     output_saver.save_classify(5, "analysis/classify_output.json")
     output_saver.save_classify_by_truth("analysis/classify_by_truth_output.json")
+
+    if collected_outputs:
+        outputs = torch.cat(collected_outputs, dim=0)
+        targets = torch.cat(collected_targets, dim=0)
+        std_stats = module_metric.mae_with_std(outputs, targets)
+        log.update({k: float(v) for k, v in std_stats.items()})
 
 
 if __name__ == '__main__':

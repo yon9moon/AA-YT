@@ -20,16 +20,14 @@ def top_k_acc(output, target, k=3):
             correct += torch.sum(pred[:, i] == target).item()
     return correct / len(target)
 
-#（Mean Absolute Error，MAE）
-def mae_xs(output, target):
-    with torch.no_grad():
-        MAE_x = torch.mean(torch.abs(output[:,0]-target[:,0])).item()
-    return MAE_x * 20
+def mae_x(output, target):
+    """计算 x 坐标的 MAE"""
+    return torch.mean(torch.abs(output[:, 0] - target[:, 0])) * 20
 
-def mae_ys(output, target):
-    with torch.no_grad():
-        MAE_y = torch.mean(torch.abs(output[:,1]-target[:,1])).item()
-    return MAE_y * 20
+
+def mae_y(output, target):
+    """计算 y 坐标的 MAE"""
+    return torch.mean(torch.abs(output[:, 1] - target[:, 1])) * 20
 
 def mae_xt(output, target):
     with torch.no_grad():
@@ -41,24 +39,28 @@ def mae_yt(output, target):
         MAE_y = torch.mean(torch.abs(output[:,3]-target[:,3])).item()
     return MAE_y
 
-def mae_x(output, target, num_bins=85):
+# ---------- 新增：用来在 validation 时一次性计算所有统计指标（MAE ± Std） ----------
+def mae_with_std(output, target, scale=20.0):
+    """
+    在 validation 阶段一次性计算：
+    MAE_x ± Std_x, MAE_y ± Std_y, RMSE_x, RMSE_y
+    返回一个 dict，方便 Trainer 直接 log
+    """
     with torch.no_grad():
-        bin_edges = torch.linspace(-1, 1, num_bins + 1, device=output.device)
-        pred = torch.argmax(output, dim=1)
-        x_bins = pred // num_bins
-        x_values = (bin_edges[x_bins] + bin_edges[x_bins + 1]) / 2 * 42
-        true_x_bins = target // num_bins
-        true_x_values = (bin_edges[true_x_bins] + bin_edges[true_x_bins + 1]) / 2 * 42
-        mae = torch.mean(torch.abs(x_values - true_x_values))
-    return mae.item()
+        pred = output.cpu().numpy() * scale
+        gt   = target.cpu().numpy() * scale
 
-def mae_y(output, target, num_bins=85):
-    with torch.no_grad():
-        bin_edges = torch.linspace(-1, 1, num_bins + 1, device=output.device)
-        pred = torch.argmax(output, dim=1)
-        y_bins = pred % num_bins
-        y_values = (bin_edges[y_bins] + bin_edges[y_bins + 1]) / 2 * 42
-        true_y_bins = target % num_bins
-        true_y_values = (bin_edges[true_y_bins] + bin_edges[true_y_bins + 1]) / 2 * 42
-        mae = torch.mean(torch.abs(y_values - true_y_values))
-    return mae.item()
+        ae_x = np.abs(pred[:, 0] - gt[:, 0])
+        ae_y = np.abs(pred[:, 1] - gt[:, 1])
+
+        result = {
+            'MAE_x':     ae_x.mean(),
+            'MAE_x_std': ae_x.std(),
+            'MAE_y':     ae_y.mean(),
+            'MAE_y_std': ae_y.std(),
+        }
+        # 可选：整体 MAE（两个通道平均）
+        result['MAE_avg'] = (result['MAE_x'] + result['MAE_y']) / 2
+        result['MAE_avg_std'] = np.std(np.abs(pred - gt))  # 所有误差的 std
+
+        return result

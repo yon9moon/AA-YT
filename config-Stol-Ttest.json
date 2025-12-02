@@ -1,5 +1,5 @@
 {
-    "name": "70028Stol(10)-Ttest",
+    "name": "SimSetting_So-Ttest(20)",
     "n_gpu": 1,
     "arch": {
         "type": "AAmodel",
@@ -10,25 +10,23 @@
         }
     },
     "data_loader": {
-        "type": "DA_70028_DataLoader",
+        "type": "AADataLoader",
         "args": {
-            "data_dir": ["/home/lwy/70028-Stol-target-dataset"],
+            "data_dir": "/home/lwy/So-dataset-Source",
             "batch_size": 64,
             "shuffle": true,
             "num_workers": 8,
-            "img_num": 5,
-            "split": "train"
+            "img_num": 5
         }
     },
     "valid_data_loader": {
-        "type": "DA_70028_DataLoader",
+        "type": "AADataLoader",
         "args": {
-            "data_dir": "/home/lwy/724-70028/XY/test-DA",
+            "data_dir": "/home/lwy/Stol-dataset-Target/test",
             "batch_size": 64,
             "shuffle": true,
             "num_workers": 8,
-            "img_num": 5,
-            "split": "valid"
+            "img_num": 5
         }
     },
     "optimizer": {
