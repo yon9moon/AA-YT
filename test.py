@@ -7,6 +7,7 @@ import model.metric as module_metric
 import model.model as module_arch
 from parse_config import ConfigParser
 from save import OutputSaver
+from train import SEED
 
 
 def main(config):
@@ -15,8 +16,11 @@ def main(config):
     # 在 main 函数开始时创建 OutputSaver 对象
     output_saver = OutputSaver()
 
+    g = torch.Generator()
+    g.manual_seed(SEED)
+
     # setup data_loader instances
-    data_loader = config.init_obj('data_loader', module_data)
+    data_loader = config.init_obj('data_loader', module_data, generator=g)
 
     # build model architecture
     model = config.init_obj('arch', module_arch)
@@ -62,24 +66,28 @@ def main(config):
             batch_size = data.shape[0]
             total_loss += loss.item() * batch_size
             for i, metric in enumerate(metric_fns):
-                total_metrics[i] += metric(output, target) * batch_size
+                metric_value = metric(output, target)
+                if torch.is_tensor(metric_value):
+                    metric_value = metric_value.detach().cpu().item()
+                total_metrics[i] += metric_value * batch_size
 
     n_samples = len(data_loader.sampler)
     log = {'loss': total_loss / n_samples}
     log.update({
         met.__name__: total_metrics[i].item() / n_samples for i, met in enumerate(metric_fns)
     })
-    logger.info(log)
-    # 在所有预测完成后，保存数据
-    output_saver.save("analysis/output.json")
-    output_saver.save_classify(5, "analysis/classify_output.json")
-    output_saver.save_classify_by_truth("analysis/classify_by_truth_output.json")
-
     if collected_outputs:
         outputs = torch.cat(collected_outputs, dim=0)
         targets = torch.cat(collected_targets, dim=0)
         std_stats = module_metric.mae_with_std(outputs, targets)
         log.update({k: float(v) for k, v in std_stats.items()})
+
+    logger.info(log)
+
+    # 在所有预测完成后，保存数据
+    output_saver.save("analysis/output.json")
+    output_saver.save_classify(5, "analysis/classify_output.json")
+    output_saver.save_classify_by_truth("analysis/classify_by_truth_output.json")
 
 
 if __name__ == '__main__':

@@ -20,12 +20,12 @@ def top_k_acc(output, target, k=3):
             correct += torch.sum(pred[:, i] == target).item()
     return correct / len(target)
 
-def mae_x(output, target):
+def mae_xs(output, target):
     """计算 x 坐标的 MAE"""
     return torch.mean(torch.abs(output[:, 0] - target[:, 0])) * 20
 
 
-def mae_y(output, target):
+def mae_ys(output, target):
     """计算 y 坐标的 MAE"""
     return torch.mean(torch.abs(output[:, 1] - target[:, 1])) * 20
 
