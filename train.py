@@ -23,7 +23,7 @@ os.environ['KMP_DUPLICATE_LIB_OK']='True'
 # np.random.seed(SEED)
 
 # ==================== 完整种子锁定 ====================
-SEED = 123
+SEED = 42
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -39,18 +39,12 @@ torch.backends.cudnn.benchmark = False
 def main(config):
     logger = config.get_logger('train')
 
-    # --- 随机性验证 ---
-    print("=== 随机性检查 ===")
-    print("Python:", random.random())
-    print("NumPy: ", np.random.rand(2))
-    print("Torch CPU:", torch.rand(2).numpy())
-    if torch.cuda.is_available():
-        print("Torch GPU:", torch.rand(2, device='cuda').cpu().numpy())
-    # -------------------
+    g = torch.Generator()
+    g.manual_seed(SEED)
         
     # setup data_loader instances
-    data_loader = config.init_obj('data_loader', module_data)
-    valid_data_loader = config.init_obj('valid_data_loader', module_data)
+    data_loader = config.init_obj('data_loader', module_data, generator=g)
+    valid_data_loader = config.init_obj('valid_data_loader', module_data, generator=g)
 
 
     # build model architecture, then print to console

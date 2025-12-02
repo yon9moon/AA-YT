@@ -23,6 +23,7 @@ import random
 from operator import itemgetter
 from PIL import Image
 from collections import defaultdict
+from train import SEED
 
 def normalization(data):
     _range = np.max(data) - np.min(data)
@@ -61,6 +62,12 @@ def crop_offaxis(img, size):
     return padded_img
 
 def crop_centroid(img, size):
+
+    if isinstance(img, Image.Image):
+        img = np.array(img)
+    else:
+        img = np.asarray(img)
+
     noise_floor = 20 
     _, processed_img = cv2.threshold(img.astype(np.uint8), noise_floor, 255, cv2.THRESH_TOZERO)
     
@@ -191,30 +198,24 @@ def adjust_gamma(image):
     adjusted_image = np.array(np.power((image/255), invgamma)*255, dtype=np.uint8)
     return adjusted_image
 
-# ==================== 种子锁定（DataLoader 专用） ====================
-SEED = 123   # 与 train.py 保持一致
-
 def _worker_init_fn(worker_id: int) -> None:
-    """每个 worker 进程的随机种子"""
-    worker_seed = (torch.initial_seed() + worker_id) % (2 ** 32)
+    worker_seed = torch.initial_seed() % (2**32) 
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-# 为所有 DataLoader 提供统一的 Generator
-_dataloader_generator = torch.Generator()
-_dataloader_generator.manual_seed(SEED)
-# ==============================================================
-
 
 class AADataLoader(DataLoader):
-    def __init__(self, data_dir, img_num, batch_size, shuffle=True, num_workers=8, training=True):
+    def __init__(self, data_dir, img_num, batch_size, generator: torch.Generator, 
+                 shuffle=True, num_workers=8, training=True):
         
         self.data_dir = data_dir
         self.img_num = img_num
         self.num_workers = num_workers
         self.batch_size = batch_size
         self.dataset = XY_Dataset(data_dir, img_num, batch_size)
-        super().__init__(self.dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+        super().__init__(self.dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers,
+                         worker_init_fn=_worker_init_fn,
+                        generator=generator)
         
 
         self.info = {
@@ -300,18 +301,40 @@ class XY_Dataset(Dataset):
         # # 读取所有文件夹（直到叶子节点）
         # leaf_folders = [dirpath for dirpath, dirnames, filenames in os.walk(data_dir) if not dirnames]
 
-        # 获取第一级子目录中命名大于等于 5 的文件夹
-        top_level_folders = [
-            os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
-            if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) > 0
-        ]
+        is_train_data = 'train' in data_dir
 
-        # 遍历筛选后的文件夹，提取叶子节点
-        leaf_folders = [
-            dirpath for top_folder in top_level_folders
-            for dirpath, dirnames, filenames in os.walk(top_folder)
-            if not dirnames
-        ]
+        if is_train_data:
+            top_level_folders = [
+                os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
+                if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) < 71
+            ]
+            # 遍历筛选后的文件夹，提取叶子节点
+            leaf_folders = [
+                dirpath for top_folder in top_level_folders
+                for dirpath, dirnames, filenames in os.walk(top_folder)
+                if not dirnames
+            ]
+
+            filtered_folders = []
+            for folder in leaf_folders:
+                last_part = folder.split('/')[-1]
+                label_strings = last_part.split(' ')  # 根据逗号分割
+                labels = [float(label) * 1000 for label in label_strings[:2]]
+                if labels[0] % 1 == 0 and labels[1] % 1 ==0:  # 仅保留 label[0] 能被2整除的文件夹
+                    filtered_folders.append(folder)
+            leaf_folders = filtered_folders
+        else:
+            top_level_folders = [
+                os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
+                if os.path.isdir(os.path.join(data_dir, folder))
+            ]
+
+            # 遍历筛选后的文件夹，提取叶子节点
+            leaf_folders = [
+                dirpath for top_folder in top_level_folders
+                for dirpath, dirnames, filenames in os.walk(top_folder)
+                if not dirnames
+            ]
         # 将结果赋值给 self.folder_list
         self.folder_list = leaf_folders
 
@@ -332,16 +355,12 @@ class XY_Dataset(Dataset):
         last_part = parts[-1] # 取出最后一部分，例如 '-4 -6 0'
         label_strings = last_part.split(' ')  # 根据,分割
         labels = [float(label) for label in label_strings[:2]]
-        labels = torch.tensor(labels) / 0.015 # 转换为 PyTorch 张量
+        labels = torch.tensor(labels) / 0.02 # 转换为 PyTorch 张量
 
-        # 70028
-        # image_list = [f for f in os.listdir(folder_name) if f.endswith('.png')]
-
-        # 251
-        # image_list = [f for f in os.listdir(folder_name) if f.endswith('.png') and (f == '0.png' or f.endswith('-p.png'))]
-        image_list = [f for f in os.listdir(folder_name) if f.endswith('.png') and not f.endswith('-p.png')]
+        # simulation setting
+        image_list = [f for f in os.listdir(folder_name) if f.endswith('.png')]
         image_list = sorted(image_list, key=lambda x: x)
-        # image_list = [image_list[0]] + image_list[-4:]  # 取第一张和最后四张
+        image_list = [image_list[0]] + image_list[-4:]  # 取第一张和最后四张
 
 
         # 循环加载三张图片
@@ -351,13 +370,8 @@ class XY_Dataset(Dataset):
                 raise ValueError(f"Error: The length of image_list ({len(image_list)}) does not match img_num ({self.img_num}).\n"
                                 f"Folder name: {folder_name}\n"
                                 f"Image list: {image_list}")
-            image = Image.open(os.path.join(folder_name, image_list[i]))
-            image = np.array(image)
-            # image = adjust_gamma(image)
-            image = cv2.medianBlur(image, 3)
-            image = Image.fromarray(image)
-            image = normalization(image)
-            image = crop_centroid(image, 70)
+            image = Image.open(os.path.join(folder_name, image_list[i])).convert('L')
+            image = self.crop_centroid(image, 50)
             image = self.transform(image)
             image = image.float() 
             images.append(image)
@@ -366,9 +380,27 @@ class XY_Dataset(Dataset):
         images = torch.stack(images)
 
         return images, labels, lens_dir
+
+    def crop_centroid(self, image, crop_size):
+        """Crop image to specified size centered at the centroid using projection method"""
+
+        img_array = np.array(image)
+        # Locate centroid using projection
+        row_sums = np.sum(img_array, axis=1)
+        y_center = np.argmax(row_sums)
+        col_sums = np.sum(img_array, axis=0)
+        x_center = np.argmax(col_sums)
+        half_size = crop_size // 2
+        crop = img_array[y_center - half_size:y_center + half_size, x_center - half_size:x_center + half_size]
+        
+        if crop.shape != (crop_size, crop_size):
+            raise ValueError(f"Cropped image size not {crop_size}x{crop_size}")
+        
+        return Image.fromarray(crop)
     
 class DA_70028_DataLoader(DataLoader):
-    def __init__(self, data_dir, img_num, batch_size, shuffle=True, num_workers=8, training=True, split='train'):
+    def __init__(self, data_dir, img_num, batch_size, generator: torch.Generator,
+                 shuffle=True, num_workers=8, training=True, split='train'):
 
         # 如果 data_dir 是字符串，转换为列表
         if isinstance(data_dir, str):
@@ -384,8 +416,8 @@ class DA_70028_DataLoader(DataLoader):
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=num_workers,
-            worker_init_fn=_worker_init_fn,          # <<< 新增
-            generator=_dataloader_generator           # <<< 新增
+            worker_init_fn=_worker_init_fn,
+            generator=generator
         )
         
 
@@ -415,7 +447,7 @@ class DA_70028_Dataset(Dataset):
                 # 筛选第一级子目录中命名
                 top_level_folders = [
                     os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
-                    if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) > 20 and int(folder) < 22
+                    if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) > 15 and int(folder) < 28
                 ]
                 # 遍历筛选后的文件夹，提取叶子节点
                 leaf_folders = [
@@ -428,7 +460,7 @@ class DA_70028_Dataset(Dataset):
                     last_part = folder.split('/')[-1]
                     label_strings = last_part.split(',')  # 根据逗号分割
                     labels = [float(label) for label in label_strings[:2]]
-                    if labels[0] % 10 == 0 and labels[1] % 10 ==0:  # 仅保留 label[0] 能被2整除的文件夹
+                    if labels[0] % 2 == 0 and labels[1] % 2 ==0:  # 仅保留 label[0] 能被2整除的文件夹
                         filtered_folders.append(folder)
                 leaf_folders = filtered_folders
 

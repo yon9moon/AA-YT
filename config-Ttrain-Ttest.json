@@ -1,5 +1,5 @@
 {
-    "name": "70028Ttrain(5, 2um)-Ttest(18)",
+    "name": "SimSet_Ttrain(1, 5um)-Ttest(20)",
     "n_gpu": 1,
     "arch": {
         "type": "AAmodel",
@@ -10,9 +10,9 @@
         }
     },
     "data_loader": {
-        "type": "DA_70028_DataLoader",
+        "type": "AADataLoader",
         "args": {
-            "data_dir": "/home/lwy/724-70028/XY/train-DA",
+            "data_dir": "/home/lwy/Stol-dataset-Target/train",
             "batch_size": 64,
             "shuffle": true,
             "num_workers": 8,
@@ -20,9 +20,9 @@
         }
     },
     "valid_data_loader": {
-        "type": "DA_70028_DataLoader",
+        "type": "AADataLoader",
         "args": {
-            "data_dir": "/home/lwy/724-70028/XY/test-DA",
+            "data_dir": "/home/lwy/Stol-dataset-Target/test",
             "batch_size": 64,
             "shuffle": true,
             "num_workers": 8,
