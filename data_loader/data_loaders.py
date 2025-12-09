@@ -24,6 +24,51 @@ from operator import itemgetter
 from PIL import Image
 from collections import defaultdict
 from train import SEED
+import torch.nn.functional as F
+
+# ==================== 退化函数（batch 级） ====================
+def batch_jpg_down_up(x, scale):
+    B, N, C, H, W = x.shape
+    x_flat = x.view(B*N, C, H, W)
+    new_h, new_w = int(H * scale), int(W * scale)
+    down = F.interpolate(x_flat, size=(new_h, new_w), mode='nearest')
+    up = F.interpolate(down, size=(H, W), mode='nearest')
+    return up.view(B, N, C, H, W)
+
+def batch_gaussian_blur(x, kernel_size, sigma):
+    B, N, C, H, W = x.shape
+    x_flat = x.view(B*N, C, H, W)
+    device = x_flat.device
+
+    # 1D kernel
+    k = kernel_size
+    t = torch.arange(k, device=device, dtype=torch.float32)
+    kernel = torch.exp(-((t - k//2)**2) / (2 * sigma**2))
+    kernel = kernel / kernel.sum()
+    kernel = kernel.view(1, 1, k, 1).repeat(C, 1, 1, 1)
+
+    pad = k // 2
+    x_pad = F.pad(x_flat, (pad, pad, pad, pad), mode='reflect')
+    blurred = F.conv2d(x_pad, kernel, groups=C)
+    kernel_t = kernel.transpose(2, 3)
+    blurred = F.conv2d(blurred, kernel_t, groups=C)
+    return blurred.view(B, N, C, H, W)
+
+def batch_gaussian_noise(x, std):
+    noise = torch.normal(0, std, size=x.shape, device=x.device, dtype=x.dtype)
+    return x + noise
+
+def batch_random_mask(x, ratio):
+    mask = torch.rand_like(x) < ratio
+    return x * (~mask).float()
+
+# 退化池
+DEGRADE_OPS = {
+    'jpg':     lambda x: batch_jpg_down_up(x, scale=random.uniform(0.4, 0.7)),
+    'blur':    lambda x: batch_gaussian_blur(x, kernel_size=random.choice([3,5,7]), sigma=random.uniform(0.5, 2.0)),
+    'noise':   lambda x: batch_gaussian_noise(x, std=random.uniform(0.02, 0.08)),
+    'mask':    lambda x: batch_random_mask(x, ratio=random.uniform(0.05, 0.20)),
+}
 
 def normalization(data):
     _range = np.max(data) - np.min(data)
@@ -300,33 +345,33 @@ class XY_Dataset(Dataset):
 
         # # 读取所有文件夹（直到叶子节点）
         # leaf_folders = [dirpath for dirpath, dirnames, filenames in os.walk(data_dir) if not dirnames]
-
-        is_train_data = 'train' in data_dir
+        is_train_data = '/home/lwy/Stol-dataset-Source/train' in data_dir
 
         if is_train_data:
+            selected_folders = {60, 17, 8, 24, 50, 1, 26, 15, 45, 43}
             top_level_folders = [
-                os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
-                if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) < 71
+            os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
+            if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) in selected_folders
             ]
             # 遍历筛选后的文件夹，提取叶子节点
             leaf_folders = [
-                dirpath for top_folder in top_level_folders
-                for dirpath, dirnames, filenames in os.walk(top_folder)
-                if not dirnames
+            dirpath for top_folder in top_level_folders
+            for dirpath, dirnames, filenames in os.walk(top_folder)
+            if not dirnames
             ]
 
             filtered_folders = []
             for folder in leaf_folders:
                 last_part = folder.split('/')[-1]
                 label_strings = last_part.split(' ')  # 根据逗号分割
-                labels = [float(label) * 1000 for label in label_strings[:2]]
+                labels = [float(label) for label in label_strings[:2]]
                 if labels[0] % 1 == 0 and labels[1] % 1 ==0:  # 仅保留 label[0] 能被2整除的文件夹
                     filtered_folders.append(folder)
             leaf_folders = filtered_folders
         else:
             top_level_folders = [
-                os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
-                if os.path.isdir(os.path.join(data_dir, folder))
+            os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
+            if os.path.isdir(os.path.join(data_dir, folder))
             ]
 
             # 遍历筛选后的文件夹，提取叶子节点
@@ -355,7 +400,7 @@ class XY_Dataset(Dataset):
         last_part = parts[-1] # 取出最后一部分，例如 '-4 -6 0'
         label_strings = last_part.split(' ')  # 根据,分割
         labels = [float(label) for label in label_strings[:2]]
-        labels = torch.tensor(labels) / 0.02 # 转换为 PyTorch 张量
+        labels = torch.tensor(labels) / 20 # 转换为 PyTorch 张量
 
         # simulation setting
         image_list = [f for f in os.listdir(folder_name) if f.endswith('.png')]
@@ -447,7 +492,7 @@ class DA_70028_Dataset(Dataset):
                 # 筛选第一级子目录中命名
                 top_level_folders = [
                     os.path.join(data_dir, folder) for folder in os.listdir(data_dir)
-                    if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) > 15 and int(folder) < 28
+                    if os.path.isdir(os.path.join(data_dir, folder)) and int(folder) > 19 and int(folder) < 22
                 ]
                 # 遍历筛选后的文件夹，提取叶子节点
                 leaf_folders = [
@@ -684,6 +729,31 @@ class DA_70028_Dataset(Dataset):
 
             # 三张图片塞进一个tensor中
             images = torch.stack(images)
+
+            # ==================== 随机退化（只对模拟域） ====================
+        is_simulated = not (
+            '/home/lwy/724-70028/XY' in folder_name or
+            '/home/lwy/Ttest2SowithoutISP' in folder_name or
+            '/home/lwy/Ttest2SowoISP_TOL_train' in folder_name
+        )
+
+        ENABLE_DEGRADE = False
+        N_DEGRADES = 1
+        FIXED_DEGRADE = None  # 可设为 'jpg' / 'blur' / 'noise' / 'mask' 用于消融
+
+        if ENABLE_DEGRADE and is_simulated:
+            x = images.unsqueeze(0)  # -> (1, N, 1, H, W) 适配 batch 函数
+
+            if FIXED_DEGRADE:
+                ops = [FIXED_DEGRADE]
+            else:
+                ops = random.sample(list(DEGRADE_OPS.keys()), k=N_DEGRADES)
+
+            for op_name in ops:
+                # 关键：这里直接调用你写好的 lambda，内部自动用全局 random（已由 worker_init_fn 锁定）
+                x = DEGRADE_OPS[op_name](x)
+
+            images = torch.clamp(x.squeeze(0), 0, 1)
 
         return images, labels, lens_dir
     

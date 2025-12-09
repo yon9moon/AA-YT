@@ -1,5 +1,5 @@
 {
-    "name": "SimSetting_So-Ttest(20)",
+    "name": "Simsetting_Stol(10)-Ttest(20)",
     "n_gpu": 1,
     "arch": {
         "type": "AAmodel",
@@ -12,7 +12,7 @@
     "data_loader": {
         "type": "AADataLoader",
         "args": {
-            "data_dir": "/home/lwy/So-dataset-Source",
+            "data_dir": "/home/lwy/Stol-dataset-Source/train",
             "batch_size": 64,
             "shuffle": true,
             "num_workers": 8,
