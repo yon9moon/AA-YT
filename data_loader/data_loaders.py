@@ -522,7 +522,7 @@ class DA_70028_Dataset(Dataset):
                     if not dirnames
                 ]
             
-            elif '/home/lwy/Stol2trg' in data_dir:
+            elif '/home/lwy/Stol2trg' in data_dir and '/home/lwy/Stol2trg_Cyclegan_labeled' not in data_dir:
 
                 # 读取所有叶子文件夹
                 leaf_folders = [dirpath for dirpath, dirnames, filenames in os.walk(data_dir) if not dirnames]
@@ -717,7 +717,8 @@ class DA_70028_Dataset(Dataset):
                     '/home/lwy/stol2trg' in folder_name or
                     '/home/lwy/So_wISP2So_woISP' in folder_name or
                     '/home/lwy/Stol2SowoISP' in folder_name or
-                    '/home/lwy/Stol2trg' in folder_name
+                    '/home/lwy/Stol2trg' in folder_name or
+                    '/home/lwy/So2trg' in folder_name
                 ):
                     pass
                 else:
