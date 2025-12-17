@@ -13,7 +13,9 @@ saved/*
 # 忽略模型权重文件
 *.pth
 *.pt
-
+*.png
+*.svg
+*.pdf
 # 忽略输出文件夹
 outputs/
 checkpoints/

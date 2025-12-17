@@ -21,8 +21,8 @@ class OutputSaver:
         self.classify_data = {}
 
     def update(self, predictions, targets, info):
-        self.all_predictions.append(predictions.cpu().numpy())
-        self.all_targets.append(targets.cpu().numpy())
+        self.all_predictions.append((predictions * 20).cpu().numpy())
+        self.all_targets.append((targets * 20).cpu().numpy())
         self.lens_dirs.append(info['lens_dir'])
 
     def save(self, save_file):

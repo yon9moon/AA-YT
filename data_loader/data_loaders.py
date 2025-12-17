@@ -643,7 +643,7 @@ class DA_70028_Dataset(Dataset):
         # 从文件夹名中提取标签
         folder_name = self.folder_list[idx]
         parts = folder_name.split('/')
-        lens_dir = '/'.join(parts[:6])
+        lens_dir = '/'.join(parts[6:8])
         last_part = parts[-1] # 取出最后一部分，例如 '-4 -6 0'
 
         is_real_data = '/home/lwy/724-70028/XY' in folder_name or '/home/lwy/Ttest2SowithoutISP' in folder_name or '/home/lwy/Ttest2SowoISP_TOL_train' in folder_name
