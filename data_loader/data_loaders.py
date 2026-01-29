@@ -757,7 +757,222 @@ class DA_70028_Dataset(Dataset):
             images = torch.clamp(x.squeeze(0), 0, 1)
 
         return images, labels, lens_dir
-    
+
+class GI_70028_DataLoader(DataLoader):
+    def __init__(self, data_dir, img_num, batch_size, generator: torch.Generator,
+                 shuffle=True, num_workers=8, use_gi=False, training=True): # 1. 新增 use_gi 参数
+
+        # 如果 data_dir 是字符串，转换为列表
+        if isinstance(data_dir, str):
+            data_dir = [data_dir]
+
+        self.data_dirs = data_dir
+        self.img_num = img_num
+        self.num_workers = num_workers
+        self.batch_size = batch_size
+        self.use_gi = use_gi
+
+        # 2. 实例化 Dataset (注意参数变化)
+        # 移除了 batch_size，传入了 use_gi
+        # transform 使用 Dataset 内部默认的即可，如果有自定义需求也可以在这里传入
+        self.dataset = GI_70028_Dataset(
+            data_dirs=self.data_dirs, 
+            img_num=self.img_num, 
+            use_gi=self.use_gi
+        )
+
+        # 3. 初始化父类 DataLoader
+        super().__init__(
+            dataset=self.dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            worker_init_fn=_worker_init_fn, # 确保这个函数在你代码的其他地方定义了
+            generator=generator
+        )
+        
+        self.info = {
+            "list_path_data": self.data_dirs,
+            "len(dataset)": len(self.dataset),
+            "use_gi": self.use_gi # 记录当前模式
+        }
+
+class GI_70028_Dataset(Dataset):
+    def __init__(self, data_dirs, img_num, transform=None, use_gi=False):
+        """
+        :param data_dirs: 字符串或列表，包含数据的根目录
+        :param img_num: 每个样本包含的图片数量 (例如 5 个 FOV)
+        :param transform: PyTorch transform
+        :param use_gi: Bool, 是否启用梯度信息 (GI) 模式
+                       True: 寻找成对样本 (x, x+dx)，返回 cat 后的 tensor
+                       False: 仅返回当前样本
+        """
+        # 1. 统一处理路径列表
+        if isinstance(data_dirs, str):
+            data_dirs = [data_dirs]
+        self.data_dirs = data_dirs
+        
+        self.img_num = img_num
+        self.use_gi = use_gi
+        
+        # 默认的 transform
+        if transform is None:
+            self.transform = transforms.Compose([
+                transforms.ToTensor()
+            ])
+        else:
+            self.transform = transform
+
+        # --- 定义微扰量 (必须与数据生成时的逻辑一致) ---
+        # 假设生成时：X-Shift + 0.002, X-Tilt + 0.05
+        self.delta_shift_x = 0.002
+        self.delta_shift_y = 0.0
+        self.delta_tilt_x = 0.05
+        self.delta_tilt_y = 0.0
+
+        # --- Step 1: 扫描所有文件夹 ---
+        candidate_folders = []
+        print(f"Scanning directories: {self.data_dirs} ...")
+        
+        for data_dir in self.data_dirs:
+            for root, dirs, files in os.walk(data_dir):
+                # 简单判断：如果文件夹里包含 png 文件，视为一个样本文件夹
+                has_png = any(f.endswith('.png') for f in files)
+                if has_png:
+                    candidate_folders.append(root)
+
+        # --- Step 2: 建立全局索引 (Coordinate -> Path) ---
+        # 这是一个关键步骤，不管文件分散在哪里，我们都把它们映射到坐标上
+        self.label_to_path = {}
+        
+        for folder in candidate_folders:
+            try:
+                # 解析文件夹名 "Sx Sy Tx Ty"
+                # 例如: "-0.010 0.010 0.500 -0.500"
+                last_part = os.path.basename(folder)
+                
+                # 处理可能存在的后缀 (例如 _dup)
+                if '_' in last_part:
+                    clean_name = last_part.split('_')[0]
+                else:
+                    clean_name = last_part
+                
+                parts = clean_name.split(' ')
+                if len(parts) != 4: 
+                    continue
+
+                # 转 float
+                s_x, s_y, t_x, t_y = map(float, parts)
+                
+                # 【关键】为了避免 float 精度问题导致的字典 key 匹配失败
+                # 我们统一保留小数点后 5 位作为 Key
+                key = (round(s_x, 5), round(s_y, 5), round(t_x, 5), round(t_y, 5))
+                
+                self.label_to_path[key] = folder
+            except ValueError:
+                continue
+
+        # --- Step 3: 根据模式过滤样本 ---
+        self.valid_samples = []
+
+        if not self.use_gi:
+            # 模式 A: 不需要 GI，所有找到的文件夹都是有效样本
+            # 将 key 存入列表，方便 getitem 索引
+            self.valid_samples = list(self.label_to_path.keys())
+            print(f"[Mode: No-GI] Loaded {len(self.valid_samples)} samples.")
+        
+        else:
+            # 模式 B: 需要 GI，必须找到配对
+            # 只有当 (Current) 和 (Current + Delta) 都存在时，才算一个有效样本
+            count = 0
+            for key in self.label_to_path.keys():
+                s_x, s_y, t_x, t_y = key
+                
+                # 计算目标 (Perturbed) 坐标
+                target_s_x = round(s_x + self.delta_shift_x, 5)
+                target_s_y = round(s_y + self.delta_shift_y, 5)
+                target_t_x = round(t_x + self.delta_tilt_x, 5)
+                target_t_y = round(t_y + self.delta_tilt_y, 5)
+                
+                target_key = (target_s_x, target_s_y, target_t_x, target_t_y)
+                
+                # 检查字典里是否有这个 target
+                if target_key in self.label_to_path:
+                    # 只有配对成功的才加入列表
+                    # 存入 tuple: (current_key, target_key)
+                    self.valid_samples.append((key, target_key))
+                    count += 1
+            
+            print(f"[Mode: GI] Loaded {count} paired samples (found corresponding perturbed data).")
+
+    def _load_images_from_folder(self, folder_path):
+        """
+        读取文件夹下的图片并 stack
+        """
+        # 获取所有png
+        files = [f for f in os.listdir(folder_path) if f.endswith('.png')]
+        # 排序，确保 FOV 1,2,3,4,5 顺序正确 (假设文件名是 1.png, 2.png...)
+        # 注意：字符串排序 '10.png' 会排在 '2.png' 前面，建议按数字转换排序
+        files = sorted(files, key=lambda x: int(os.path.splitext(x)[0]))
+        
+        if len(files) < self.img_num:
+            # 安全检查，防止读取错误
+             raise ValueError(f"Not enough images in {folder_path}, expected {self.img_num}, got {len(files)}")
+        
+        # 只取前 img_num 张
+        files = files[:self.img_num]
+        
+        images = []
+        for f in files:
+            path = os.path.join(folder_path, f)
+            img = Image.open(path).convert('L') # 转灰度
+            if self.transform:
+                img = self.transform(img)
+            images.append(img)
+            
+        return torch.stack(images) # Shape: [Img_Num, C, H, W]
+
+    def __len__(self):
+        return len(self.valid_samples)
+
+    def __getitem__(self, idx):
+        if not self.use_gi:
+            # --- 模式 A: 仅返回原始图像 ---
+            current_key = self.valid_samples[idx]
+            folder_path = self.label_to_path[current_key]
+            
+            img_tensor = self._load_images_from_folder(folder_path)
+            
+            # Label 处理 (sx, sy, tx, ty)
+            # 建议不在这里做除法归一化，而是保持原始值，在 loss function 或外部处理
+            label = torch.tensor(current_key, dtype=torch.float32)
+            
+            return img_tensor, label, folder_path
+
+        else:
+            # --- 模式 B: 返回 (原始 + 微扰) ---
+            # 此时 valid_samples 存的是 pair: (key_origin, key_target)
+            key_origin, key_target = self.valid_samples[idx]
+            
+            path_origin = self.label_to_path[key_origin]
+            path_target = self.label_to_path[key_target]
+            
+            # 加载两组图
+            img_origin = self._load_images_from_folder(path_origin) # [5, 1, H, W]
+            img_target = self._load_images_from_folder(path_target) # [5, 1, H, W]
+            
+            # 拼接: 在 Channel 维度拼接，还是 Stack? 
+            # 通常做差分网络是 Concatenate together
+            # 假设 img_origin 是 [5, 1, 70, 70] -> 变为 [5, 2, 70, 70] ? 
+            # 或者如果是当作一个大输入 -> [10, 1, 70, 70]
+            # 这里按照你之前的代码逻辑：dim=0 拼接，变成 [10, 1, 70, 70]
+            
+            combined_images = torch.cat((img_origin, img_target), dim=0) 
+            
+            # Label 通常是原始坐标
+            label = torch.tensor(key_origin, dtype=torch.float32)
+            
+            return combined_images, label, path_origin
 
 class DA_70028_Dataset_classification(Dataset):
     def __init__(self, data_dir, img_num, batch_size, num_bins=85):
