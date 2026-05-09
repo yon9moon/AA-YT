@@ -8,6 +8,7 @@ from utils import inf_loop, MetricTracker
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from model.metric import mae_with_std
+import torch.nn.functional as F
 
 
 class Trainer(BaseTrainer):
@@ -38,6 +39,14 @@ class Trainer(BaseTrainer):
         self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
         self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
 
+    def _weighted_loss(self, output, target, w1=1, w2=1):
+        """
+        计算加权 MSE Loss：前两维权重 w1，后两维权重 w2
+        """
+        loss1 = F.mse_loss(output[:, :2], target[:, :2])
+        loss2 = F.mse_loss(output[:, 2:], target[:, 2:])
+        return w1 * loss1 + w2 * loss2
+
     def _train_epoch(self, epoch):
         """
         Training logic for an epoch
@@ -52,7 +61,7 @@ class Trainer(BaseTrainer):
 
             self.optimizer.zero_grad()
             output = self.model(data)
-            loss = self.criterion(output, target)
+            loss = self._weighted_loss(output, target)
             loss.backward()
             self.optimizer.step()
 
@@ -98,7 +107,7 @@ class Trainer(BaseTrainer):
                 data, target = data.to(self.device), target.to(self.device)
 
                 output = self.model(data)
-                loss = self.criterion(output, target)
+                loss = self._weighted_loss(output, target)
 
                 all_outputs.append(output.cpu())
                 all_targets.append(target.cpu())

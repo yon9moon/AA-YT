@@ -24,7 +24,7 @@ lens_dirs = [lens_dir.split('/')[-1] for lens_dir in average_errors_by_lens_dir.
 average_errors = list(average_errors_by_lens_dir.values())
 
 # 将lens_dirs和average_errors打包成元组列表，然后按照lens_dir排序
-sorted_pairs = sorted(zip(lens_dirs, average_errors), key=lambda pair: int(pair[0]))
+sorted_pairs = sorted(zip(lens_dirs, average_errors), key=lambda pair: pair[0])
 
 # 解压排序后的元组列表，得到排序后的lens_dirs和average_errors
 lens_dirs, average_errors = zip(*sorted_pairs)

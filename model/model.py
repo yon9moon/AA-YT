@@ -1,45 +1,56 @@
 import torch.nn as nn
 import torch.nn.functional as F
-# from base import BaseModel
-
 import torch
-from torchvision import datasets, transforms
 from torchvision import models
 
 class AAmodel(nn.Module):
-    def __init__(self, img_num, in_channels, num_classes):
+    def __init__(self, img_num, in_channels, num_classes=4):
         super(AAmodel, self).__init__()
-        self.model = models.resnet18(pretrained=True)
-        # self.model.load_state_dict(torch.load('/home/lhb/backbone/resnet50-19c8e357.pth'))
-        conv1 =  self.model.conv1
-        conv1 = torch.nn.Conv2d(img_num * in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        self.model.conv1 = conv1
-        fc = self.model.fc
-        fc_in_features = fc.in_features
+        self.backbone = models.resnet18(pretrained=True)
+        
+        # 修改第一层
+        self.backbone.conv1 = nn.Conv2d(
+            img_num * in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False
+        )
+        
+        fc_in_features = self.backbone.fc.in_features
+        self.backbone.fc = nn.Identity()
 
-
-        # 删除 Dropout 层，并将全连接层直接连接
-        self.model.fc = nn.Linear(fc_in_features, num_classes)
+        # XY 分支：增加 BN 和 Dropout，提升稳定性
+        self.head_xy = nn.Sequential(
+            nn.Linear(fc_in_features, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.2), 
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 2)
+        )
+        
+        # UV 分支：进一步加强正则化，防止死记硬背
+        self.head_uv = nn.Sequential(
+            nn.Linear(fc_in_features, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.4),               # 提高 Dropout 比例
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),           # 增加 BN
+            nn.ReLU(),
+            nn.Dropout(0.3),               # 多层 Dropout
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 2)
+        )
         
     def forward(self, x):
-        x = x.view(x.size(0), -1, x.size(3), x.size(4))
-        x = self.model(x) 
-
-        return x
-    
-
-class AAmodel_classification(nn.Module):
-    def __init__(self, img_num, in_channels, num_bins=85):
-        super(AAmodel_classification, self).__init__()
-        self.model = models.resnet18(pretrained=True)
-        conv1 = self.model.conv1
-        conv1 = torch.nn.Conv2d(img_num * in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        self.model.conv1 = conv1
-        fc = self.model.fc
-        fc_in_features = fc.in_features
-        self.model.fc = nn.Linear(fc_in_features, num_bins * num_bins)  # 输出num_bins * num_bins类
+        if x.dim() == 5:
+            x = x.view(x.size(0), -1, x.size(3), x.size(4))
         
-    def forward(self, x):
-        x = x.view(x.size(0), -1, x.size(3), x.size(4))
-        x = self.model(x)
-        return x
+        # 共享 Backbone 提取底层特征
+        features = self.backbone(x)
+        
+        # 分支各自进行高维映射
+        xy = self.head_xy(features)
+        uv = self.head_uv(features)
+        
+        return torch.cat([xy, uv], dim=1)

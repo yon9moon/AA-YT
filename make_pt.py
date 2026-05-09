@@ -18,12 +18,12 @@ def main(args):
     path = os.path.dirname(pretrained_path)
     print(path)
     
-    net = AAmodel(img_num=img_input, in_channels=1, num_classes=2).to(device)
+    net = AAmodel(img_num=img_input, in_channels=1, num_classes=4).to(device)
     weights = torch.load(pretrained_path, map_location='cpu')    
     net.load_state_dict(weights['state_dict'])
     net.eval()
 
-    input = torch.rand(1, img_input, 1, 480, 640)
+    input = torch.rand(1, img_input, 1, 240, 240)
 
     traced_script_module_resnet = torch.jit.trace(net, input)
     traced_script_module_resnet.save(path + "/model_best.pt") 

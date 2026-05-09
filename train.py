@@ -14,14 +14,6 @@ from utils import prepare_device
 import os
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
-
-# # fix random seeds for reproducibility
-# SEED = 123
-# torch.manual_seed(SEED)
-# torch.backends.cudnn.deterministic = True
-# torch.backends.cudnn.benchmark = False
-# np.random.seed(SEED)
-
 # ==================== 完整种子锁定 ====================
 SEED = 42
 
@@ -41,11 +33,40 @@ def main(config):
 
     g = torch.Generator()
     g.manual_seed(SEED)
-        
-    # setup data_loader instances
-    data_loader = config.init_obj('data_loader', module_data, generator=g)
-    valid_data_loader = config.init_obj('valid_data_loader', module_data, generator=g)
 
+    # ================= 修改开始 =================
+    train_data_dir = '/root/Dataset_Splitted_0407/train/bestScan'
+    valid_data_dir = '/root/Dataset_Splitted_0407/valid/bestScan'
+    
+    # 1. 暴力修改 config 中的参数，避开 parse_config.py 的检查
+    # 我们直接修改内存中的字典配置，而不是传参
+    config['data_loader']['args']['data_dir'] = train_data_dir
+    
+    logger.info(f"Loading training data from: {train_data_dir}")
+    # 注意：这里去掉了 data_dir=... 的传参，只传 generator
+    data_loader = config.init_obj('data_loader', module_data, generator=g)
+
+    # 2. 处理验证集
+    # 如果 config.json 里没写 valid_data_loader，我们就复制 data_loader 的配置
+    if 'valid_data_loader' not in config._config:
+        # 创建一个基于 data_loader 的副本配置
+        valid_conf = config['data_loader'].copy()
+        valid_conf['args']['data_dir'] = valid_data_dir
+        valid_conf['args']['shuffle'] = False
+        
+        # 手动初始化验证集 loader
+        # 注意：这里我们要手动调用 module_data 中的类，因为 init_obj 只能处理 config 里存在的键
+        # 假设你的 DataLoader 类名叫 AADataLoader (根据之前的代码)
+        valid_data_loader = module_data.AADataLoader(
+            **valid_conf['args'],
+            generator=g
+        )
+    else:
+        # 如果 json 里有 valid_data_loader，同样暴力修改它的路径
+        config['valid_data_loader']['args']['data_dir'] = valid_data_dir
+        valid_data_loader = config.init_obj('valid_data_loader', module_data, generator=g)
+
+    logger.info(f"Loading validation data from: {valid_data_dir}")
 
     # build model architecture, then print to console
     model = config.init_obj('arch', module_arch)
@@ -53,7 +74,7 @@ def main(config):
 
     # prepare for (multi-device) GPU training
     device, device_ids = prepare_device(config['n_gpu'])
-    print('device',device)
+    print('device', device)
     model = model.to(device)
     if len(device_ids) > 1:
         model = torch.nn.DataParallel(model, device_ids=device_ids)
@@ -75,6 +96,25 @@ def main(config):
                       lr_scheduler=lr_scheduler)
 
     trainer.train()
+
+    # ================= 训练结束后清理中间 checkpoint =================
+    import glob
+    import os
+    checkpoint_dir = config.save_dir
+    # 删除所有 checkpoint-epoch*.pth 文件
+    epoch_checkpoints = glob.glob(os.path.join(checkpoint_dir, 'checkpoint-epoch*.pth'))
+    for ckpt in epoch_checkpoints:
+        try:
+            os.remove(ckpt)
+            logger.info(f"Removed intermediate checkpoint: {ckpt}")
+        except Exception as e:
+            logger.warning(f"Failed to remove {ckpt}: {e}")
+    # 保留 model_best.pth（如果存在）
+    best_path = os.path.join(checkpoint_dir, 'model_best.pth')
+    if os.path.exists(best_path):
+        logger.info(f"Kept best model: {best_path}")
+    else:
+        logger.info("No model_best.pth found, no best model saved.")
 
 
 if __name__ == '__main__':

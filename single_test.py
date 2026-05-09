@@ -13,114 +13,6 @@ from model.model import AAmodel
 import time
 
 
-def normalization(data):
-    _range = np.max(data) - np.min(data)
-    return (data - np.min(data)) / _range
-
-
-def crop_offaxis(img, size):
-    row_sums = np.sum(img, axis=1)
-    col_sums = np.sum(img, axis=0)
-    max_row_index = np.argmax(row_sums)
-    max_col_index = np.argmax(col_sums)
-
-    half_size = size // 2
-
-    # 计算裁剪区域的起始和结束索引，以 max_row_index 和 max_col_index 为中心
-    start_row = max(max_row_index - half_size, 0)
-    end_row = min(max_row_index + half_size, img.shape[0])
-    start_col = max(max_col_index - half_size, 0)
-    end_col = min(max_col_index + half_size, img.shape[1])
-
-    cropped_img = img[start_row:end_row, start_col:end_col]
-
-    # 创建一个全零图像用于填充
-    padded_img = np.zeros((size, size), dtype=img.dtype)
-
-    # 计算填充图像的起始位置，使裁剪区域居中
-    row_offset = (size - cropped_img.shape[0]) // 2
-    col_offset = (size - cropped_img.shape[1]) // 2
-
-    padded_img[row_offset:row_offset + cropped_img.shape[0], col_offset:col_offset + cropped_img.shape[1]] = cropped_img
-
-    return padded_img
-
-def crop_center(img, size):
-    row_sums = np.sum(img, axis=1)
-    max_row_index = np.argmax(row_sums)
-
-    center_col_index = img.shape[1] // 2
-    left_img = img[:, :center_col_index]
-    right_img = img[:, center_col_index:]
-
-    left_col_sums = np.sum(left_img, axis=0)
-    right_col_sums = np.sum(right_img, axis=0)
-    left_max_col_index = np.argmax(left_col_sums)
-    right_max_col_index = np.argmax(right_col_sums)
-
-    max_col_index = int((left_max_col_index + right_max_col_index + center_col_index) // 2)
-
-    half_size = size // 2
-    start_row = max_row_index - half_size
-    end_row = max_row_index + half_size
-    start_col = max_col_index - half_size
-    end_col = max_col_index + half_size
-
-    cropped_img = img[start_row:end_row, start_col:end_col]
-
-    return cropped_img
-
-def crop_cross(img, size, step):
-    row_sums = np.sum(img, axis=1)
-    col_sums = np.sum(img, axis=0)
-    max_row_index = np.argmax(row_sums)
-    max_col_index = np.argmax(col_sums)
-
-    half_size = size // 2
-    start_row = max(max_row_index - half_size, 0)
-    end_row = min(max_row_index + half_size, img.shape[0])
-    start_col = max(max_col_index - half_size, 0)
-    end_col = min(max_col_index + half_size, img.shape[1])
-
-    cross_img = img[start_row:end_row, start_col:end_col]
-
-    # upper
-    for i in range(step):
-        start_r = start_row  - (i + 1) * size
-        end_r = start_r + size
-        start_c = start_col
-        end_c = start_c + size
-        cropped_img = img[start_r:end_r, start_c:end_c]
-        cross_img = np.hstack((cross_img, cropped_img))
-
-    # left
-    for i in range(step):
-        start_r = start_row
-        end_r = start_r + size
-        start_c = start_col  - (i + 1) * size
-        end_c = start_c + size
-        cropped_img = img[start_r:end_r, start_c:end_c]
-        cross_img = np.hstack((cross_img, cropped_img))
-
-    for i in range(step):
-        start_r = start_row + (i + 1) * size
-        end_r = start_r + size
-        start_c = start_col
-        end_c = start_c + size
-        cropped_img = img[start_r:end_r, start_c:end_c]
-        cross_img = np.hstack((cross_img, cropped_img))
-
-    for i in range(step):
-        start_r = start_row
-        end_r = start_r + size
-        start_c = start_col + (i + 1) * size
-        end_c = start_c + size
-        cropped_img = img[start_r:end_r, start_c:end_c]
-        cross_img = np.hstack((cross_img, cropped_img))
-
-    return cross_img
-
-
 class ImageLoader:
     def __init__(self, image_path, img_num):
         self.image_path = image_path
@@ -131,108 +23,55 @@ class ImageLoader:
 
     def load_image(self):
         images = []
-        # 从文件夹名中提取标签
-        folder_name = self.image_path
-        parts = folder_name.split('/')
-        last_part = parts[-1] # 取出最后一部分，例如 '-4 -6 0'
-        label_strings = last_part.split(',')  # 再次分割，得到 ['-4', '-6', '0']
-        labels = [float(label) for label in label_strings[:2]]
-        labels = torch.tensor(labels)  # 转换为 PyTorch 张量
-
-        image_list = [f for f in os.listdir(folder_name) if f.endswith('.png')]
-        image_list = sorted(image_list, key=lambda x: x)
-        image_list = [image_list[0]] + image_list[-4:]
-
-
-
-        # 循环加载三张图片
-        for i in range(self.img_num):
-            image = Image.open(os.path.join(folder_name, image_list[i]))
-            image = np.array(image)
-            image = cv2.medianBlur(image, 3)
-            image = Image.fromarray(image)
-            image = normalization(image)
-            # if i == 0:
-            #     image = crop_center(image, 150)
-            # else:
-            #     image = crop_offaxis(image, 150)
-            image = crop_offaxis(image, 90)
-            image = self.transform(image)
-            image = image.float() 
-            images.append(image)
-
-
-        # 三张图片塞进一个tensor中
-        images = torch.stack(images)
-
-        return images, labels
-    
-class Z_ImageLoader:
-    def __init__(self, image_path, img_num):
-        self.image_path = image_path
-        self.img_num = img_num
-        self.transform = transforms.Compose([
-            transforms.ToTensor()
-        ])
-
-    def load_image(self):
-        images = []
-        # 从文件夹名中提取标签
-        folder_name = self.image_path
-        parts = folder_name.split('/')
-        last_part = parts[-1]
-        Z_label = float(last_part)
-        Z_label = torch.tensor([Z_label])
-
+        folder_path = self.image_path
         
-        image_list = [os.path.join(folder_name, '0', f) for f in os.listdir(os.path.join(folder_name, '0')) if f.endswith('.png')]
-        image_list_f = [os.path.join(folder_name, '-4.000000', f) for f in os.listdir(os.path.join(folder_name, '-4.000000')) if f.endswith('.png')]
-        image_list_b = [os.path.join(folder_name, '4.000000', f) for f in os.listdir(os.path.join(folder_name, '4.000000')) if f.endswith('.png')]
-        image_list = image_list + image_list_f + image_list_b
-        image_list = sorted(image_list, key=lambda x: x)
+        # 1. 获取文件夹名作为 Label (例如 "-0.002 0.000 0.000 0.000")
+        folder_name = os.path.basename(folder_path)
+        
+        # 2. 获取上一级文件夹名作为 Lens ID (例如 "AYZZO...")
+        # 这样写不再依赖绝对路径的层级深度 (parts[:6])
+        lens_dir = os.path.basename(os.path.dirname(folder_path))
 
+        # --- 修改点 3: 图片加载逻辑 ---
+        # 确保只读取 png 并排序
+        all_files = os.listdir(folder_path)
+        image_files = [f for f in all_files if f.endswith('.png')]
+        image_files = sorted(image_files) # 排序很重要，保证顺序是 02, 03, 08...
 
+        # 检查图片数量
+        # 新数据集只有5张图，如果你设置 img_num=5 没问题。
+        # 如果 img_num 还是 3，需要确认取哪几张。这里默认取前 img_num 张。
+        current_len = len(image_files)
+        if current_len < self.img_num:
+            # 如果图片不够，通常是生成脚本出了问题，或者读取了错误的文件夹
+            raise ValueError(f"Error: Not enough images ({current_len} < {self.img_num}) in {folder_path}")
 
-        # 循环加载三张图片
+        # 循环加载图片
         for i in range(self.img_num):
-            image_path = os.path.join(folder_name, image_list[i])
-            image = Image.open(image_path)
-            image = np.array(image)
-            # image = adjust_gamma(image)
-            image = cv2.medianBlur(image, 3)
-            image = Image.fromarray(image)
-            image = normalization(image)
-            image = crop_offaxis(image, 90)
-            # image = crop_cross(image, 16, 5)
+            img_path = os.path.join(folder_path, image_files[i])
+            image = Image.open(img_path).convert('L') # 转灰度
             image = self.transform(image)
             image = image.float() 
             images.append(image)
 
+        # 堆叠图片 (Channel 维度堆叠: C=img_num, H, W)
         images = torch.stack(images)
 
-        return images, Z_label
+        return images
+
     
 # 加载训练好的模型
-
-# XY-10um-5imgs model
-# model_path = '/mnt1/lwy/AA-YT/saved/models/AA/0724_200546/model_best.pth'
-
-
-
-# Z model
-model_path = '/mnt1/lwy/AA-YT/saved/models/AA/0724_192739/model_best.pth'
-# model_path = 'saved/models/AA/0613_142808/model_best.pth'
-# model_path = 'saved/models/AA/0628_102409/model_best.pth'
+model_path = 'saved/models/0407_Ttrain-Ttest_new_xy+uv_mse_data0407/0407_203954/model_best.pth'
 
 
 checkpoint = torch.load(model_path)
-model = AAmodel(img_num=27, in_channels=1, num_classes=1)
+model = AAmodel(img_num=5, in_channels=1, num_classes=4)
 model.load_state_dict(checkpoint['state_dict'])
 model.eval()  # 设置模型为评估模式
 
 
-test_dataset = Z_ImageLoader(image_path='/home/lwy/724-70028/Z/valid/16/8', img_num=27)
-imgs, label = test_dataset.load_image()
+test_dataset = ImageLoader(image_path='/root/Dataset_Splitted_0407/train/AAScan/0403-7/-0.006 0.010 -0.016 -0.003 -0.009 0.000 1', img_num=5)
+imgs = test_dataset.load_image()
 imgs = imgs.unsqueeze(0)
 
 

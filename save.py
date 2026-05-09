@@ -21,8 +21,8 @@ class OutputSaver:
         self.classify_data = {}
 
     def update(self, predictions, targets, info):
-        self.all_predictions.append((predictions * 20).cpu().numpy())
-        self.all_targets.append((targets * 20).cpu().numpy())
+        self.all_predictions.append((predictions * 0.1).cpu().numpy())
+        self.all_targets.append((targets * 0.1).cpu().numpy())
         self.lens_dirs.append(info['lens_dir'])
 
     def save(self, save_file):
@@ -32,7 +32,7 @@ class OutputSaver:
         absolute_errors = np.abs(all_predictions - all_targets)
         data_dict = {
             'predict': all_predictions.tolist(),
-            'truth': all_targets.astype(int).tolist(),
+            'truth': all_targets.tolist(),
             'absolute_errors': absolute_errors.tolist(),
             'lens_dirs':  [item for sublist in self.lens_dirs for item in sublist] 
         }

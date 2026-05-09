@@ -13,3 +13,7 @@ def mse_loss_means(output, target):
 def cross_entropy_loss(output, target):
     criterion = torch.nn.CrossEntropyLoss()
     return criterion(output, target)
+
+def huber_loss(output, target):
+    criterion = torch.nn.HuberLoss(delta=0.01)
+    return criterion(output, target)
