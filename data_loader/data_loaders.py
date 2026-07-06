@@ -1,6 +1,7 @@
 import sys
 # sys.path.append('/mnt1/lwy/AA') # 如果路径变了，这里可能也需要根据实际情况注释或修改
 from torchvision import datasets, transforms
+from torchvision.transforms import functional as TF
 from base import BaseDataLoader
 import os
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
@@ -11,13 +12,13 @@ to_image = ToPILImage()
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset 
-from torch.utils.data import DataLoader 
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
 import glob
 import cv2
 from pathlib import Path
 import random
-from PIL import Image
+from PIL import Image, ImageFilter
 from collections import defaultdict
 from train import SEED # 如果 train.py 不在同级目录可能会报错，建议作为参数传入或硬编码
 import torch.nn.functional as F
@@ -31,14 +32,60 @@ def test_transform(img):
     return img
 
 def _worker_init_fn(worker_id: int) -> None:
-    worker_seed = torch.initial_seed() % (2**32) 
+    worker_seed = torch.initial_seed() % (2**32)
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
+
+# ── Group-consistent augmentation ──────────────────────────────────
+
+class GroupAugmentation:
+    """
+    Apply the SAME random augmentation to a group of images.
+    Ensures all 5 images in a measurement share identical transforms.
+    """
+    def __init__(self, rotation_deg=3.0, brightness_range=(0.8, 1.2),
+                 blur_sigma_range=(0.0, 1.5)):
+        self.rotation_deg = rotation_deg
+        self.brightness_range = brightness_range
+        self.blur_sigma_range = blur_sigma_range
+        self.active = (rotation_deg > 0 or brightness_range is not None or
+                       (blur_sigma_range is not None and blur_sigma_range[1] > 0))
+
+    def _sample_params(self):
+        """Sample augmentation parameters once per group."""
+        params = {}
+        if self.rotation_deg > 0:
+            params['angle'] = random.uniform(-self.rotation_deg, self.rotation_deg)
+        if self.brightness_range is not None:
+            params['brightness'] = random.uniform(*self.brightness_range)
+        if self.blur_sigma_range is not None and self.blur_sigma_range[1] > 0:
+            params['blur_sigma'] = random.uniform(*self.blur_sigma_range)
+        return params
+
+    def apply(self, pil_images, params=None):
+        """Apply same augmentation to a list of PIL images."""
+        if not self.active:
+            return pil_images
+        if params is None:
+            params = self._sample_params()
+        augmented = []
+        for img in pil_images:
+            if 'angle' in params and params['angle'] != 0:
+                img = img.rotate(params['angle'], resample=Image.BILINEAR, expand=False)
+            if 'blur_sigma' in params and params['blur_sigma'] > 0.1:
+                img = img.filter(ImageFilter.GaussianBlur(radius=params['blur_sigma']))
+            if 'brightness' in params:
+                factor = params['brightness']
+                if factor != 1.0:
+                    img = img.point(lambda p: min(255, max(0, int(p * factor))))
+            augmented.append(img)
+        return augmented
+
 class AADataLoader(DataLoader):
-    def __init__(self, data_dir=None, data_dirs=None, img_num=5, batch_size=64, generator=None, 
-                 shuffle=True, num_workers=8, training=True):
-        
+    def __init__(self, data_dir=None, data_dirs=None, img_num=5, batch_size=64, generator=None,
+                 shuffle=True, num_workers=8, training=True, group_aug=None):
+
         # 支持 data_dir (单个或列表) 或 data_dirs (列表)
         if data_dirs is not None:
             self.data_dirs = data_dirs if isinstance(data_dirs, list) else [data_dirs]
@@ -46,11 +93,11 @@ class AADataLoader(DataLoader):
             self.data_dirs = data_dir if isinstance(data_dir, list) else [data_dir]
         else:
             raise ValueError("Either 'data_dir' or 'data_dirs' must be provided")
-        
+
         self.img_num = img_num
         self.num_workers = num_workers
         self.batch_size = batch_size
-        self.dataset = XY_Dataset(self.data_dirs, img_num, batch_size)
+        self.dataset = XY_Dataset(self.data_dirs, img_num, batch_size, group_aug=group_aug)
         
         # worker_init_fn 需要在外部定义或者 import，如果原来代码里有 _worker_init_fn 请确保它存在
         # 这里假设你原本的代码环境里有这个函数，如果没有，可以去掉 worker_init_fn 参数
@@ -68,7 +115,7 @@ class AADataLoader(DataLoader):
 
     
 class XY_Dataset(Dataset):
-    def __init__(self, data_dirs, img_num, batch_size):
+    def __init__(self, data_dirs, img_num, batch_size, group_aug=None):
         # 支持传入单个路径字符串或路径列表
         if isinstance(data_dirs, str):
             data_dirs = [data_dirs]
@@ -78,6 +125,7 @@ class XY_Dataset(Dataset):
         self.data_dirs = data_dirs
         self.img_num = img_num
         self.batch_size = batch_size
+        self.group_aug = group_aug  # GroupAugmentation or None
 
         # --- 修改点 1: 支持多个路径 ---
         # 遍历所有 data_dirs，收集包含 .png 的叶子文件夹
@@ -143,10 +191,18 @@ class XY_Dataset(Dataset):
             # 如果图片不够，通常是生成脚本出了问题，或者读取了错误的文件夹
             raise ValueError(f"Error: Not enough images ({current_len} < {self.img_num}) in {folder_path}")
 
-        # 循环加载图片
+        # 循环加载图片 — 先加载为 PIL，统一增强后再转 tensor
+        pil_images = []
         for i in range(self.img_num):
             img_path = os.path.join(folder_path, image_files[i])
-            image = Image.open(img_path).convert('L') # 转灰度
+            pil_images.append(Image.open(img_path).convert('L'))
+
+        # 施加 group-consistent 增强（相同随机参数应用于全组）
+        if self.group_aug is not None and self.group_aug.active:
+            pil_images = self.group_aug.apply(pil_images)
+
+        # 转 tensor
+        for image in pil_images:
             image = self.transform(image)
             image = image.float()
             images.append(image)

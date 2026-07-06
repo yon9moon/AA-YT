@@ -34,39 +34,25 @@ def main(config):
     g = torch.Generator()
     g.manual_seed(SEED)
 
-    # ================= 修改开始 =================
-    train_data_dir = '/root/Dataset_Splitted_0407/train/bestScan'
-    valid_data_dir = '/root/Dataset_Splitted_0407/valid/bestScan'
-    
-    # 1. 暴力修改 config 中的参数，避开 parse_config.py 的检查
-    # 我们直接修改内存中的字典配置，而不是传参
-    config['data_loader']['args']['data_dir'] = train_data_dir
-    
-    logger.info(f"Loading training data from: {train_data_dir}")
-    # 注意：这里去掉了 data_dir=... 的传参，只传 generator
+    # 直接使用 config 中的 data_dir（支持字符串或列表）
+    train_dirs = config['data_loader']['args']['data_dir']
+    logger.info(f"Loading training data from: {train_dirs}")
     data_loader = config.init_obj('data_loader', module_data, generator=g)
 
-    # 2. 处理验证集
-    # 如果 config.json 里没写 valid_data_loader，我们就复制 data_loader 的配置
+    # 处理验证集
     if 'valid_data_loader' not in config._config:
-        # 创建一个基于 data_loader 的副本配置
+        # 如果 config 里没写 valid_data_loader，复制 data_loader 的配置
         valid_conf = config['data_loader'].copy()
-        valid_conf['args']['data_dir'] = valid_data_dir
         valid_conf['args']['shuffle'] = False
-        
-        # 手动初始化验证集 loader
-        # 注意：这里我们要手动调用 module_data 中的类，因为 init_obj 只能处理 config 里存在的键
-        # 假设你的 DataLoader 类名叫 AADataLoader (根据之前的代码)
         valid_data_loader = module_data.AADataLoader(
             **valid_conf['args'],
             generator=g
         )
     else:
-        # 如果 json 里有 valid_data_loader，同样暴力修改它的路径
-        config['valid_data_loader']['args']['data_dir'] = valid_data_dir
         valid_data_loader = config.init_obj('valid_data_loader', module_data, generator=g)
 
-    logger.info(f"Loading validation data from: {valid_data_dir}")
+    valid_dirs = config['valid_data_loader']['args']['data_dir'] if 'valid_data_loader' in config._config else config['data_loader']['args']['data_dir']
+    logger.info(f"Loading validation data from: {valid_dirs}")
 
     # build model architecture, then print to console
     model = config.init_obj('arch', module_arch)

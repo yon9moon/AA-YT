@@ -19,3 +19,14 @@ saved/*
 # 忽略输出文件夹
 outputs/
 checkpoints/
+
+# 实验生成文件
+experiments/configs/
+experiments/results/
+experiments/summary/*.png
+experiments/summary/*.csv
+experiments/manifest.csv
+experiments/run_log*.txt
+experiments/augment_log.txt
+experiments/augment_ft_log.txt
+experiments/finetune_log.txt
